@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>yh</title>
+  
+  <subtitle>swift Node.js iOS</subtitle>
+  <link href="/atom.xml" rel="self"/>
+  
+  <link href="http://yoursite.com/"/>
+  <updated>2018-05-12T17:14:28.125Z</updated>
+  <id>http://yoursite.com/</id>
+  
+  <author>
+    <name>yanghuan</name>
+    
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>swift-nio源码阅读系列1</title>
+    <link href="http://yoursite.com/2018/05/11/swift-nio%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB%E7%B3%BB%E5%88%971/"/>
+    <id>http://yoursite.com/2018/05/11/swift-nio源码阅读系列1/</id>
+    <published>2018-05-11T14:33:34.000Z</published>
+    <updated>2018-05-12T17:14:28.125Z</updated>
+    
+    <content type="html"><![CDATA[<a id="more"></a><h1 id="概要"><a href="#概要" class="headerlink" title="概要"></a>概要</h1><h2 id="swift-nio"><a href="#swift-nio" class="headerlink" title="swift-nio"></a>swift-nio</h2><p><em>Apple</em> 今年三月份的时候开源了<a href="https://github.com/apple/swift-nio" title="swift-nio" target="_blank" rel="noopener">swift-nio</a>这个库:</p><blockquote><p>SwiftNIO is a cross-platform asynchronous event-driven network application framework for rapid development of maintainable high performance protocol servers &amp; clients.<br>It’s like Netty, but written for Swift.</p></blockquote><p>所以<code>swift-nio</code>有如下几个特点:</p><h4 id="Network-Application-Framework"><a href="#Network-Application-Framework" class="headerlink" title="Network Application Framework"></a><em>Network Application Framework</em></h4><p><code>SwiftNIO</code>服务于高性能的<strong>服务器或客户端协议</strong>,也就是说，<code>SwiftNIO</code>是一个通用的网络层<em>应用</em>，它使用<code>异步事件驱动</code>提供高性能网络处理，服务于上层协议,它不是<code>node</code>中的<code>Express</code>,<code>socket.io</code>这种具体的<code>http</code>,<code>websocket</code>等协议框架,—,基于<code>swift-nio</code>我们可以实现<code>swift</code>版的各种应用层框架</p><h4 id="Cross-platform"><a href="#Cross-platform" class="headerlink" title="Cross-platform"></a><em>Cross-platform</em></h4><p><code>SwiftNio</code>目标旨在支持所有支持<code>Swift</code>的平台，目前支持<code>linux</code>和<code>macOS</code></p><h4 id="Asynchronous-event-driven"><a href="#Asynchronous-event-driven" class="headerlink" title="Asynchronous event-driven"></a><em>Asynchronous event-driven</em></h4><p><code>SwiftNIO</code>为所有的IO调用实现了异步的形式,针对socket网络IO和一般文件IO采用不同策略实现,这里先引用一下几种常见的I/O模型:</p><blockquote><p>同步阻塞（Blocking IO）：最简单的一种IO模型，用户线程在进行IO操作的时候通常是个系统调用，用户线程会由用户空间进入内核空间，内核空间数据包准备好后会将数据拷贝到用户空间，这个时候线程在用户态继续执行。</p></blockquote><blockquote><p>同步非阻塞（Non-blocking IO）：同步非阻塞IO即在同步阻塞的基础之上将socket设置为NONBLOCK。这样用户线程在发起IO操作之后可以立即返回，但是用户线程需要不断轮询来请求数据。</p></blockquote><blockquote><p>IO多路复用（IO Multiplexing）：即Reactor设计模式，多路复用模型从流程上和同步阻塞的区别不大，主要区别在于操作系统为用户提供了同时轮询多个IO句柄来查看是否有IO事件的接口（如select），这从根本上允许用户可以使用单个线程来管理多个IO句柄的问题,相较于异步IO,epoll只是通知用户sokcet可以用了,用户需要自己把数据从系统拷贝出来(通过系统调用)</p></blockquote><blockquote><p>异步IO（Asynchronous IO）：即Proactor设计模式。在异步IO模型中，用户不需要去轮询IO事件，然后才进行数据的读取，处理；在异步IO模型中，IO事件就绪的时候，内核会开启一个独立的内核线程去执行执行IO操作，实现真正的异步IO。这个时候用户线程可以直接读取内核线程准备好的数据。  </p></blockquote><p>NIO的结合了上述的同步非阻塞和IO多路复用实现，这样实现了单线程处理大量并发并可以异步的处理结果。其实上面说的异步IO是最好的解决方法，但是目前Linux下的异步IO框架<code>AIO</code>并不是很成熟，所以这里依旧使用了传统的<code>Reactor</code>模式:</p><ol><li>通过将socket设置为<code>NONBLOCK</code>,注册到<code>epoll</code>中，并设置回调函数</li><li>通过<code>epoll</code>帮我们把可用的socket取回</li><li>执行上述的回调，操作准备就绪的socket，用户开始执行IO操作</li></ol><p><code>epoll</code>这些I/O模型只是针对于网络I/O(<code>socket</code>,<code>pipe</code>),并不能用于磁盘上的文件I/O,这两者之间有一些区别，socket这些IO之所以会发生阻塞是因为它在等socket就绪，也即等待另一端的数据到来,这段过程中,线程是不占用cpu时间片的</p><p>但是文件IO并没有就绪这个概念, 它就是上述的同步阻塞模型,当你要从文件读数据的时候,cpu将会一直忙碌的帮你把数据从磁盘拷贝到操作系统，再拷贝到用户空间，只要有cpu资源它就可以立马工作(有可用的线程),因为这个过程是同步的，会阻塞线程中的其他任务,所以为了不影响<code>epoll</code>线程分发<code>socket</code>事件，使用一个线程池专门处理这些文件IO,其他一些cpu耗时的任务也可以扔到线程池中。    </p><p><code>SwiftNIO</code>中的<code>NIO</code>指代的就是上述的IO模型,提供了高性能的Socket处理,基于这个<code>NIO</code>,<code>SwiftNIO</code>又做了一些抽象和封装,从而实现了一个通用的网络层应用<br>之前有了解Node.js的底层实现,<code>node</code>底层依托于<code>libuv</code>这个C++库,而<code>libuv</code>为node提供了<code>No blocking IO</code>的能力,下面是<code>libuv</code>的架构图:</p><div align="center"><br><img src="https://raw.githubusercontent.com/lbhbrave/blogImageHosting/master/img/libuv.png" width="70%" height="70%"><br></div><p>将图中的几个关键名词换成<code>SwiftNIO</code>中的名字,它就是<code>SwiftNIO</code>中的<code>NIO</code>部分的架构了:</p><ul><li><code>uv_io_t</code>对应<code>Selector</code>,封装了不同系统下的IO多路复用模块(不包括图中的<code>event ports</code>)，提供统一接口</li><li><code>Thread Pool</code>对应<code>BlockingIOThreadPool</code>,线程池的实现</li><li><code>File I/O</code>对应<code>NonBlockingFileIO</code>，使用线程池实现的异步文件I/O</li><li>IOCP是Windows下提供的异步I/O接口，和<code>epoll</code>这种有本质上的区别，上面已经提到过，目前SwiftNIO还不支持Windows平台</li></ul><p><code>SwiftNIO</code>本身可以看作是两部分,一部分是<code>NIO</code>,另一部分是网络框架,引用官方的介绍:</p><blockquote><p>SwiftNIO does not aim to provide high-level solutions like, for example, web frameworks do. Instead, SwiftNIO is focused on providing the low-level building blocks for these higher-level applications. When it comes to building a web application, most users will not want to use SwiftNIO directly: instead, they’ll want to use one of the many great web frameworks available in the Swift ecosystem. Those web frameworks, however, may choose to use SwiftNIO under the covers to provide their networking support</p></blockquote><p>接下来会对这两部分的一些核心概念进行介绍</p><hr><h3 id="NIO"><a href="#NIO" class="headerlink" title="NIO"></a>NIO</h3><h3 id="SwiftNIO-Netty"><a href="#SwiftNIO-Netty" class="headerlink" title="SwiftNIO Netty"></a>SwiftNIO Netty</h3>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;a id=&quot;more&quot;&gt;&lt;/a&gt;
+&lt;h1 id=&quot;概要&quot;&gt;&lt;a href=&quot;#概要&quot; class=&quot;headerlink&quot; title=&quot;概要&quot;&gt;&lt;/a&gt;概要&lt;/h1&gt;&lt;h2 id=&quot;swift-nio&quot;&gt;&lt;a href=&quot;#swift-nio&quot; class=&quot;headerli
+      
+    
+    </summary>
+    
+    
+      <category term="swift" scheme="http://yoursite.com/tags/swift/"/>
+    
+      <category term="backend" scheme="http://yoursite.com/tags/backend/"/>
+    
+  </entry>
+  
+</feed>
